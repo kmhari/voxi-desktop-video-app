@@ -27,9 +27,24 @@ typedef enum {
 typedef struct {
     char name[256];
     char id[256];
+    char manufacturer[256];
+    char model[256];
+    char serial_number[256];
     AudioDeviceType type;
     AudioConnectionType connection;
     bool is_default;
+    bool is_alive;
+    bool is_running;
+    int input_channels;
+    int output_channels;
+    int sample_rate;
+    int bit_depth;
+    float volume;
+    bool is_muted;
+    int device_id_numeric;
+    char transport_type_name[64];
+    char data_source[256];
+    char clock_source[256];
 } AudioDevice;
 
 // Function prototypes

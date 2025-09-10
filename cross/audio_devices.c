@@ -225,7 +225,7 @@ int list_audio_output_devices(AudioDevice** devices) {
     AudioObjectPropertyAddress propertyAddress = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
     
     UInt32 dataSize = 0;
@@ -354,13 +354,144 @@ int list_audio_output_devices(AudioDevice** devices) {
             CFRelease(deviceUID);
         }
         
+        // Initialize all fields
+        (*devices)[device_count].device_id_numeric = audioDevices[i];
+        (*devices)[device_count].input_channels = 0;
+        (*devices)[device_count].output_channels = outputChannels;
+        (*devices)[device_count].sample_rate = 0;
+        (*devices)[device_count].bit_depth = 0;
+        (*devices)[device_count].volume = 0.0f;
+        (*devices)[device_count].is_muted = false;
+        (*devices)[device_count].is_alive = false;
+        (*devices)[device_count].is_running = false;
+        strcpy((*devices)[device_count].manufacturer, "Unknown");
+        strcpy((*devices)[device_count].model, "Unknown");
+        strcpy((*devices)[device_count].serial_number, "Unknown");
+        strcpy((*devices)[device_count].transport_type_name, "Unknown");
+        strcpy((*devices)[device_count].data_source, "Unknown");
+        strcpy((*devices)[device_count].clock_source, "Unknown");
+        
         // Check if default device
         if (audioDevices[i] == defaultDevice) {
             (*devices)[device_count].is_default = true;
         }
         
+        // Get device manufacturer
+        propertyAddress.mSelector = kAudioDevicePropertyDeviceManufacturerCFString;
+        CFStringRef deviceManufacturer = NULL;
+        dataSize = sizeof(CFStringRef);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &deviceManufacturer);
+        if (status == noErr && deviceManufacturer != NULL) {
+            CFStringGetCString(deviceManufacturer, (*devices)[device_count].manufacturer, 256, kCFStringEncodingUTF8);
+            CFRelease(deviceManufacturer);
+        }
+        
+        // Get device model UID
+        propertyAddress.mSelector = kAudioDevicePropertyModelUID;
+        CFStringRef deviceModel = NULL;
+        dataSize = sizeof(CFStringRef);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &deviceModel);
+        if (status == noErr && deviceModel != NULL) {
+            CFStringGetCString(deviceModel, (*devices)[device_count].model, 256, kCFStringEncodingUTF8);
+            CFRelease(deviceModel);
+        }
+        
+        // Get device serial number
+        propertyAddress.mSelector = kAudioObjectPropertySerialNumber;
+        CFStringRef deviceSerial = NULL;
+        dataSize = sizeof(CFStringRef);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &deviceSerial);
+        if (status == noErr && deviceSerial != NULL) {
+            CFStringGetCString(deviceSerial, (*devices)[device_count].serial_number, 256, kCFStringEncodingUTF8);
+            CFRelease(deviceSerial);
+        }
+        
+        // Get device alive status
+        propertyAddress.mSelector = kAudioDevicePropertyDeviceIsAlive;
+        UInt32 isAlive = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &isAlive);
+        if (status == noErr) {
+            (*devices)[device_count].is_alive = (isAlive != 0);
+        }
+        
+        // Get device running status
+        propertyAddress.mSelector = kAudioDevicePropertyDeviceIsRunning;
+        UInt32 isRunning = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &isRunning);
+        if (status == noErr) {
+            (*devices)[device_count].is_running = (isRunning != 0);
+        }
+        
+        // Get nominal sample rate
+        propertyAddress.mSelector = kAudioDevicePropertyNominalSampleRate;
+        Float64 sampleRate = 0.0;
+        dataSize = sizeof(Float64);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &sampleRate);
+        if (status == noErr) {
+            (*devices)[device_count].sample_rate = (int)sampleRate;
+        }
+        
+        // Get volume (if available)
+        propertyAddress.mSelector = kAudioDevicePropertyVolumeScalar;
+        propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
+        propertyAddress.mElement = kAudioObjectPropertyElementMain;
+        Float32 volume = 0.0f;
+        dataSize = sizeof(Float32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &volume);
+        if (status == noErr) {
+            (*devices)[device_count].volume = volume;
+        }
+        
+        // Get mute status (if available)
+        propertyAddress.mSelector = kAudioDevicePropertyMute;
+        UInt32 isMuted = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &isMuted);
+        if (status == noErr) {
+            (*devices)[device_count].is_muted = (isMuted != 0);
+        }
+        
+        // Get input channel count
+        propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration;
+        propertyAddress.mScope = kAudioDevicePropertyScopeInput;
+        status = AudioObjectGetPropertyDataSize(audioDevices[i], &propertyAddress, 0, NULL, &dataSize);
+        if (status == noErr) {
+            AudioBufferList* inputBufferList = (AudioBufferList*)malloc(dataSize);
+            status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, inputBufferList);
+            if (status == noErr) {
+                int inputChannels = 0;
+                for (int j = 0; j < inputBufferList->mNumberBuffers; j++) {
+                    inputChannels += inputBufferList->mBuffers[j].mNumberChannels;
+                }
+                (*devices)[device_count].input_channels = inputChannels;
+            }
+            free(inputBufferList);
+        }
+        
+        // Get data source (if available)
+        propertyAddress.mSelector = kAudioDevicePropertyDataSource;
+        propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
+        UInt32 dataSource = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &dataSource);
+        if (status == noErr) {
+            snprintf((*devices)[device_count].data_source, 256, "%u", dataSource);
+        }
+        
+        // Get clock source (if available)
+        propertyAddress.mSelector = kAudioDevicePropertyClockSource;
+        UInt32 clockSource = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(audioDevices[i], &propertyAddress, 0, NULL, &dataSize, &clockSource);
+        if (status == noErr) {
+            snprintf((*devices)[device_count].clock_source, 256, "%u", clockSource);
+        }
+        
         // Get transport type
         propertyAddress.mSelector = kAudioDevicePropertyTransportType;
+        propertyAddress.mScope = kAudioObjectPropertyScopeGlobal;
         UInt32 transportType = 0;
         dataSize = sizeof(UInt32);
         
@@ -377,35 +508,47 @@ int list_audio_output_devices(AudioDevice** devices) {
                 case kAudioDeviceTransportTypeBuiltIn:
                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                     (*devices)[device_count].connection = CONNECTION_BUILTIN;
+                    strcpy((*devices)[device_count].transport_type_name, "Built-in");
                     break;
                 case kAudioDeviceTransportTypeBluetooth:
                     (*devices)[device_count].type = DEVICE_TYPE_BLUETOOTH;
                     (*devices)[device_count].connection = CONNECTION_WIRELESS;
+                    strcpy((*devices)[device_count].transport_type_name, "Bluetooth");
                     break;
                 case kAudioDeviceTransportTypeUSB:
                     (*devices)[device_count].type = DEVICE_TYPE_USB;
                     (*devices)[device_count].connection = CONNECTION_WIRED;
+                    strcpy((*devices)[device_count].transport_type_name, "USB");
                     break;
                 case kAudioDeviceTransportTypeThunderbolt:
                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                     (*devices)[device_count].connection = CONNECTION_WIRED;
+                    strcpy((*devices)[device_count].transport_type_name, "Thunderbolt");
                     break;
                 case kAudioDeviceTransportTypeAirPlay:
                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                     (*devices)[device_count].connection = CONNECTION_WIRELESS;
+                    strcpy((*devices)[device_count].transport_type_name, "AirPlay");
                     break;
                 case kAudioDeviceTransportTypeVirtual:
                     (*devices)[device_count].type = DEVICE_TYPE_VIRTUAL;
                     (*devices)[device_count].connection = CONNECTION_UNKNOWN;
+                    strcpy((*devices)[device_count].transport_type_name, "Virtual");
                     break;
                 case kAudioDeviceTransportTypeDisplayPort:
+                    (*devices)[device_count].type = DEVICE_TYPE_HDMI;
+                    (*devices)[device_count].connection = CONNECTION_WIRED;
+                    strcpy((*devices)[device_count].transport_type_name, "DisplayPort");
+                    break;
                 case kAudioDeviceTransportTypeHDMI:
                     (*devices)[device_count].type = DEVICE_TYPE_HDMI;
                     (*devices)[device_count].connection = CONNECTION_WIRED;
+                    strcpy((*devices)[device_count].transport_type_name, "HDMI");
                     break;
                 default:
                     (*devices)[device_count].type = DEVICE_TYPE_UNKNOWN;
                     (*devices)[device_count].connection = CONNECTION_UNKNOWN;
+                    snprintf((*devices)[device_count].transport_type_name, 64, "Unknown (%u)", transportType);
             }
         }
         
