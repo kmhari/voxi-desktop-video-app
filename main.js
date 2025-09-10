@@ -138,6 +138,13 @@ ipcMain.handle('get-native-output-devices', async () => {
   const platform = os.platform();
   
   try {
+    // First try the native C library
+    const nativeResult = await getNativeAudioDevices();
+    if (nativeResult && nativeResult.devices && nativeResult.devices.length > 0) {
+      return nativeResult;
+    }
+    
+    // Fall back to platform-specific implementations
     if (platform === 'darwin') {
       return await getMacOSOutputDevices();
     } else if (platform === 'win32') {
@@ -150,6 +157,117 @@ ipcMain.handle('get-native-output-devices', async () => {
     return { error: error.message, devices: [] };
   }
 });
+
+// Native C library integration
+async function getNativeAudioDevices() {
+  return new Promise((resolve, reject) => {
+    const platform = os.platform();
+    let binaryPath;
+    
+    // Set binary path based on platform
+    if (platform === 'win32') {
+      binaryPath = path.join(__dirname, 'cross', 'list_audio_devices.exe');
+    } else {
+      binaryPath = path.join(__dirname, 'cross', 'list_audio_devices');
+    }
+    
+    // Check if binary exists first
+    const fs = require('fs');
+    if (!fs.existsSync(binaryPath)) {
+      console.log(`Native binary not found at ${binaryPath}, falling back to platform-specific detection`);
+      resolve(null);
+      return;
+    }
+    
+    exec(binaryPath, { timeout: 5000 }, (error, stdout, stderr) => {
+      if (error) {
+        if (error.code === 'ENOENT') {
+          console.log('Native binary not executable, falling back to platform-specific detection');
+        } else if (error.signal === 'SIGTERM') {
+          console.log('Native binary timed out, falling back to platform-specific detection');
+        } else {
+          console.log(`Native binary error: ${error.message}, falling back to platform-specific detection`);
+        }
+        resolve(null);
+        return;
+      }
+      
+      if (stderr) {
+        console.warn('Native binary stderr:', stderr);
+      }
+      
+      try {
+        // Validate output is not empty
+        if (!stdout || stdout.trim() === '') {
+          console.log('Native binary returned empty output, falling back to platform-specific detection');
+          resolve(null);
+          return;
+        }
+        
+        // Parse the JSON output from the native binary
+        const result = JSON.parse(stdout);
+        
+        // Validate result structure
+        if (!result || !Array.isArray(result.devices)) {
+          console.log('Native binary returned invalid structure, falling back to platform-specific detection');
+          resolve(null);
+          return;
+        }
+        
+        // Convert to our expected format
+        const devices = result.devices.map(device => ({
+          name: device.name || 'Unknown Device',
+          id: device.id || 'unknown',
+          deviceType: mapNativeDeviceType(device.type),
+          connectivity: mapNativeConnectionType(device.connection),
+          isDefault: device.is_default || false,
+          platform: os.platform(),
+          type: 'output',
+          source: 'native-c'
+        }));
+        
+        console.log(`Native C library detected ${devices.length} audio output devices`);
+        resolve({ devices, platform: os.platform(), source: 'native-c' });
+      } catch (parseError) {
+        console.error('Error parsing native binary output:', parseError.message);
+        console.log('Raw output:', stdout);
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Map native device types to our classification
+function mapNativeDeviceType(nativeType) {
+  const typeMap = {
+    'Speakers': 'speaker',
+    'SPEAKERS': 'speaker',
+    'Headphones': 'headphone', 
+    'HEADPHONES': 'headphone',
+    'HDMI': 'speaker',
+    'USB': 'speaker',
+    'Bluetooth': 'headphone',
+    'BLUETOOTH': 'headphone',
+    'Virtual': 'speaker',
+    'VIRTUAL': 'speaker',
+    'Unknown': 'unknown'
+  };
+  return typeMap[nativeType] || 'unknown';
+}
+
+// Map native connection types to our classification
+function mapNativeConnectionType(nativeConnection) {
+  const connectionMap = {
+    'Built-in': 'wired',
+    'BUILTIN': 'wired',
+    'Wired': 'wired',
+    'WIRED': 'wired',
+    'Wireless': 'wireless',
+    'WIRELESS': 'wireless',
+    'Unknown': 'unknown'
+  };
+  return connectionMap[nativeConnection] || 'unknown';
+}
 
 
 // Helper function to classify device type and connectivity
@@ -352,51 +470,103 @@ async function getWindowsAudioDevices() {
   });
 }
 
-// Windows audio output device enumeration
+// Windows audio output device enumeration (Enhanced for Windows 10/11)
 async function getWindowsOutputDevices() {
   return new Promise((resolve, reject) => {
-    const powershellCmd = `
-      Get-CimInstance -ClassName Win32_SoundDevice | 
-      Select-Object Name, Manufacturer, DeviceID, Status |
-      ConvertTo-Json
+    // Enhanced PowerShell command for better Windows audio detection
+    const enhancedCmd = `
+      $ErrorActionPreference = 'SilentlyContinue'
+      try {
+        # Try modern Windows Audio cmdlets first
+        $devices = Get-AudioDevice -List -ErrorAction Stop | Where-Object {$_.Type -eq "Playback"}
+        $devices | Select-Object Name, ID, Default | ConvertTo-Json -Depth 2
+      } catch {
+        # Fallback to WMI for older systems
+        Get-CimInstance -ClassName Win32_SoundDevice | 
+        Where-Object {$_.Name -notlike "*input*" -and $_.Name -notlike "*microphone*"} |
+        Select-Object Name, Manufacturer, DeviceID, Status | ConvertTo-Json -Depth 2
+      }
     `;
     
-    exec(`powershell -Command "${powershellCmd}"`, (error, stdout, stderr) => {
+    exec(`powershell -ExecutionPolicy Bypass -Command "${enhancedCmd}"`, { timeout: 15000 }, (error, stdout, stderr) => {
       if (error) {
-        reject(error);
+        // Final fallback command
+        const fallbackCmd = `Get-WmiObject -Class Win32_SoundDevice | Select-Object Name, Manufacturer, DeviceID, Status | ConvertTo-Json`;
+        exec(`powershell -Command "${fallbackCmd}"`, (fallbackError, fallbackStdout) => {
+          if (fallbackError) {
+            reject(new Error(`All PowerShell commands failed: ${error.message}`));
+            return;
+          }
+          processWindowsAudioOutput(fallbackStdout, resolve, reject, false);
+        });
         return;
       }
       
-      try {
-        // Handle empty output from PowerShell
-        const trimmedOutput = stdout.trim();
-        if (!trimmedOutput) {
-          resolve({ devices: [], platform: 'win32' });
-          return;
-        }
-        
-        const devices = JSON.parse(trimmedOutput) || [];
-        const audioDevices = (Array.isArray(devices) ? devices : [devices]).map(device => {
-          const classification = classifyAudioDevice(device.Name, device.Manufacturer);
-          
-          return {
-            name: device.Name,
-            manufacturer: device.Manufacturer || 'Unknown',
-            id: device.DeviceID,
-            status: device.Status,
-            platform: 'win32',
-            type: 'output',
-            deviceType: classification.deviceType,
-            connectivity: classification.connectivity
-          };
-        });
-        
-        resolve({ devices: audioDevices, platform: 'win32' });
-      } catch (parseError) {
-        reject(parseError);
-      }
+      processWindowsAudioOutput(stdout, resolve, reject, true);
     });
   });
+}
+
+function processWindowsAudioOutput(stdout, resolve, reject, isModernAPI) {
+  try {
+    const trimmedOutput = stdout.trim();
+    if (!trimmedOutput) {
+      resolve({ devices: [], platform: 'win32', source: 'windows-api' });
+      return;
+    }
+    
+    const devices = JSON.parse(trimmedOutput) || [];
+    const deviceArray = Array.isArray(devices) ? devices : [devices];
+    
+    const audioDevices = deviceArray
+      .filter(device => device && (device.Name || device.name)) // Filter out null/invalid devices
+      .map(device => {
+        const deviceName = device.Name || device.name || 'Unknown Device';
+        const deviceId = device.ID || device.DeviceID || device.id || 'unknown';
+        const classification = classifyAudioDevice(deviceName, device.Manufacturer);
+        
+        // Enhanced Windows-specific device classification
+        let enhancedType = classification.deviceType;
+        let enhancedConnectivity = classification.connectivity;
+        
+        // Windows-specific enhancements
+        const nameLower = deviceName.toLowerCase();
+        if (nameLower.includes('realtek')) {
+          enhancedType = nameLower.includes('headphone') ? 'headphone' : 'speaker';
+          enhancedConnectivity = 'wired';
+        } else if (nameLower.includes('nvidia') || nameLower.includes('amd') || nameLower.includes('intel')) {
+          enhancedType = 'speaker'; // Usually HDMI/Display audio
+          enhancedConnectivity = 'wired';
+        } else if (deviceId.includes('BTHENUM') || nameLower.includes('bluetooth')) {
+          enhancedType = 'headphone';
+          enhancedConnectivity = 'wireless';
+        } else if (nameLower.includes('usb')) {
+          enhancedType = nameLower.includes('headphone') ? 'headphone' : 'speaker';
+          enhancedConnectivity = 'wired';
+        }
+        
+        return {
+          name: deviceName,
+          manufacturer: device.Manufacturer || 'Unknown',
+          id: deviceId,
+          status: device.Status || (device.Default ? 'Default' : 'Available'),
+          platform: 'win32',
+          type: 'output',
+          deviceType: enhancedType,
+          connectivity: enhancedConnectivity,
+          isDefault: device.Default || false,
+          source: isModernAPI ? 'windows-modern-api' : 'windows-wmi'
+        };
+      });
+    
+    resolve({ 
+      devices: audioDevices, 
+      platform: 'win32', 
+      source: isModernAPI ? 'windows-modern-api' : 'windows-wmi' 
+    });
+  } catch (parseError) {
+    reject(parseError);
+  }
 }
 
 // Linux audio device enumeration

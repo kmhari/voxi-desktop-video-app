@@ -211,17 +211,21 @@ function displayNativeDevices(devices, platform) {
     console.log('Native Audio Input Devices:', devices);
 }
 
-function displayOutputDevices(devices, platform) {
+function displayOutputDevices(devices, platform, source) {
     outputDeviceList.innerHTML = '';
     
     devices.forEach((device, index) => {
         const deviceDiv = document.createElement('div');
+        const isNativeSource = source === 'native-c' || device.source === 'native-c';
+        const borderColor = isNativeSource ? '#dc3545' : '#28a745';
+        const backgroundColor = isNativeSource ? '#fff5f5' : '#f8fff9';
+        
         deviceDiv.style.cssText = `
-            border: 1px solid #28a745;
+            border: 1px solid ${borderColor};
             border-radius: 5px;
             padding: 15px;
             margin: 10px 0;
-            background: #f8fff9;
+            background: ${backgroundColor};
         `;
         
         let deviceInfo = `
@@ -232,17 +236,37 @@ function displayOutputDevices(devices, platform) {
             <strong>Connectivity:</strong> <span style="color: #28a745;">${device.connectivity || 'unknown'}</span><br>
         `;
         
+        // Show source information with enhanced details
+        if (isNativeSource) {
+            deviceInfo += `<strong>Source:</strong> <span style="color: #dc3545; font-weight: bold;">Native C Library</span><br>`;
+            if (device.isDefault) {
+                deviceInfo += `<strong>Status:</strong> <span style="color: #ffc107; font-weight: bold;">🔊 Default Device</span><br>`;
+            }
+        } else {
+            const sourceLabels = {
+                'windows-modern-api': '🪟 Windows Modern API',
+                'windows-wmi': '🪟 Windows WMI',
+                'windows-api': '🪟 Windows API'
+            };
+            const sourceLabel = sourceLabels[device.source] || 'Platform API';
+            deviceInfo += `<strong>Source:</strong> <span style="color: #6c757d;">${sourceLabel}</span><br>`;
+            
+            if (device.isDefault) {
+                deviceInfo += `<strong>Status:</strong> <span style="color: #ffc107; font-weight: bold;">🔊 Default Device</span><br>`;
+            }
+        }
+        
         // Platform-specific information
         if (platform === 'darwin') {
             deviceInfo += `
-                <strong>Manufacturer:</strong> ${device.manufacturer}<br>
-                <strong>Output Channels:</strong> ${device.outputChannels}<br>
-                <strong>Sample Rate:</strong> ${device.sampleRate}<br>
+                <strong>Manufacturer:</strong> ${device.manufacturer || 'N/A'}<br>
+                <strong>Output Channels:</strong> ${device.outputChannels || 'N/A'}<br>
+                <strong>Sample Rate:</strong> ${device.sampleRate || 'N/A'}<br>
             `;
         } else if (platform === 'win32') {
             deviceInfo += `
-                <strong>Manufacturer:</strong> ${device.manufacturer}<br>
-                <strong>Status:</strong> ${device.status}<br>
+                <strong>Manufacturer:</strong> ${device.manufacturer || 'N/A'}<br>
+                <strong>Status:</strong> ${device.status || 'N/A'}<br>
             `;
         } else if (platform === 'linux') {
             deviceInfo += `
@@ -292,9 +316,21 @@ enumerateOutputDevicesBtn.addEventListener('click', async () => {
         }
         
         // Display native output device information
-        displayOutputDevices(result.devices, result.platform);
+        displayOutputDevices(result.devices, result.platform, result.source);
         
-        updateStatus(`✓ Found ${result.devices.length} native audio output device(s) on ${result.platform}.`, 'success');
+        let sourceLabel = '';
+        if (result.source === 'native-c') {
+            sourceLabel = ' (Native C Library)';
+        } else if (result.source === 'windows-modern-api') {
+            sourceLabel = ' (Windows Modern API)';
+        } else if (result.source === 'windows-wmi') {
+            sourceLabel = ' (Windows WMI)';
+        }
+        
+        const defaultDevices = result.devices.filter(device => device.isDefault).length;
+        const defaultLabel = defaultDevices > 0 ? ` - ${defaultDevices} default` : '';
+        
+        updateStatus(`✓ Found ${result.devices.length} native audio output device(s) on ${result.platform}${sourceLabel}${defaultLabel}.`, 'success');
         
     } catch (error) {
         console.error('Error enumerating native output devices:', error);
