@@ -445,3 +445,174 @@ window.addEventListener('beforeunload', () => {
         stream.getTracks().forEach(track => track.stop());
     }
 });
+
+// Cross-reference native devices with Web Audio API
+async function crossReferenceDevices() {
+    try {
+        updateStatus('Cross-referencing device IDs...', 'info');
+        
+        // Get native devices from C library
+        const crossRefResult = await window.nativeAudio.getCrossReferencedDevices();
+        
+        // Get Web Audio API devices
+        const webAudioDevices = await navigator.mediaDevices.enumerateDevices();
+        const audioOutputs = webAudioDevices.filter(device => device.kind === 'audiooutput');
+        
+        console.log('Native devices:', crossRefResult.nativeDevices);
+        console.log('Web Audio devices:', audioOutputs);
+        
+        // Create matching table
+        const matches = [];
+        const unmatchedNative = [...crossRefResult.nativeDevices];
+        const unmatchedWeb = [...audioOutputs];
+        
+        // Try to match devices by ID
+        crossRefResult.nativeDevices.forEach((nativeDevice, nativeIndex) => {
+            audioOutputs.forEach((webDevice, webIndex) => {
+                // For macOS, try to match device UIDs
+                if (window.platform.getPlatform() === 'darwin') {
+                    if (nativeDevice.id === webDevice.deviceId || 
+                        nativeDevice.id.includes(webDevice.deviceId) ||
+                        webDevice.deviceId.includes(nativeDevice.id)) {
+                        matches.push({
+                            native: nativeDevice,
+                            webAudio: webDevice,
+                            matchType: 'id-match',
+                            confidence: 'high'
+                        });
+                        unmatchedNative.splice(unmatchedNative.indexOf(nativeDevice), 1);
+                        unmatchedWeb.splice(unmatchedWeb.indexOf(webDevice), 1);
+                    }
+                }
+                // For Windows, try to match by partial ID or name
+                else if (window.platform.getPlatform() === 'win32') {
+                    const webDeviceHash = webDevice.deviceId.split('').reduce((a,b) => {
+                        a = ((a << 5) - a) + b.charCodeAt(0);
+                        return a & a;
+                    }, 0);
+                    
+                    if (nativeDevice.id === webDevice.deviceId ||
+                        nativeDevice.name.toLowerCase().includes(webDevice.label.toLowerCase()) ||
+                        webDevice.label.toLowerCase().includes(nativeDevice.name.toLowerCase())) {
+                        matches.push({
+                            native: nativeDevice,
+                            webAudio: webDevice,
+                            matchType: 'name-match',
+                            confidence: 'medium'
+                        });
+                        unmatchedNative.splice(unmatchedNative.indexOf(nativeDevice), 1);
+                        unmatchedWeb.splice(unmatchedWeb.indexOf(webDevice), 1);
+                    }
+                }
+            });
+        });
+        
+        // Display results
+        displayCrossReferenceResults(matches, unmatchedNative, unmatchedWeb, crossRefResult);
+        
+        updateStatus(`Cross-reference complete: ${matches.length} matches found`, 'success');
+        
+    } catch (error) {
+        console.error('Cross-reference error:', error);
+        updateStatus(`Cross-reference failed: ${error.message}`, 'error');
+    }
+}
+
+// Display cross-reference results
+function displayCrossReferenceResults(matches, unmatchedNative, unmatchedWeb, crossRefResult) {
+    // Create or update cross-reference section
+    let crossRefSection = document.getElementById('crossReferenceSection');
+    if (!crossRefSection) {
+        crossRefSection = document.createElement('div');
+        crossRefSection.id = 'crossReferenceSection';
+        crossRefSection.innerHTML = `
+            <h3>🔗 Device ID Cross-Reference Results</h3>
+            <div id="crossRefContent"></div>
+        `;
+        document.body.appendChild(crossRefSection);
+    }
+    
+    const content = document.getElementById('crossRefContent');
+    let html = `
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+            <h4>📊 Summary</h4>
+            <p><strong>Platform:</strong> ${crossRefResult.platform}</p>
+            <p><strong>Source:</strong> ${crossRefResult.source}</p>
+            <p><strong>Matched Devices:</strong> ${matches.length}</p>
+            <p><strong>Unmatched Native:</strong> ${unmatchedNative.length}</p>
+            <p><strong>Unmatched Web Audio:</strong> ${unmatchedWeb.length}</p>
+        </div>
+    `;
+    
+    // Show matches
+    if (matches.length > 0) {
+        html += '<h4>✅ Matched Devices</h4>';
+        matches.forEach((match, index) => {
+            html += `
+                <div style="background: #d4edda; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                    <strong>Match ${index + 1}</strong> (${match.confidence} confidence, ${match.matchType})
+                    <br><strong>Native:</strong> ${match.native.name} (ID: ${match.native.id})
+                    <br><strong>Web Audio:</strong> ${match.webAudio.label} (ID: ${match.webAudio.deviceId})
+                    <br><strong>Type:</strong> ${match.native.deviceType} | <strong>Connectivity:</strong> ${match.native.connectivity}
+                </div>
+            `;
+        });
+    }
+    
+    // Show unmatched native devices
+    if (unmatchedNative.length > 0) {
+        html += '<h4>⚠️ Unmatched Native Devices</h4>';
+        unmatchedNative.forEach(device => {
+            html += `
+                <div style="background: #fff3cd; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                    <strong>${device.name}</strong><br>
+                    ID: ${device.id}<br>
+                    Type: ${device.deviceType} | Connectivity: ${device.connectivity}
+                </div>
+            `;
+        });
+    }
+    
+    // Show unmatched web audio devices
+    if (unmatchedWeb.length > 0) {
+        html += '<h4>⚠️ Unmatched Web Audio Devices</h4>';
+        unmatchedWeb.forEach(device => {
+            html += `
+                <div style="background: #f8d7da; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                    <strong>${device.label || 'Unknown Device'}</strong><br>
+                    ID: ${device.deviceId}<br>
+                    Group ID: ${device.groupId}
+                </div>
+            `;
+        });
+    }
+    
+    content.innerHTML = html;
+}
+
+// Add cross-reference button to the UI
+document.addEventListener('DOMContentLoaded', () => {
+    // Find a good place to add the button (after enumerate output devices button)
+    const outputDevicesBtn = document.getElementById('enumerateOutputDevices');
+    if (outputDevicesBtn) {
+        const crossRefBtn = document.createElement('button');
+        crossRefBtn.textContent = '🔗 Cross-Reference Device IDs';
+        crossRefBtn.id = 'crossReferenceBtn';
+        crossRefBtn.style.cssText = `
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 10px 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        `;
+        
+        crossRefBtn.addEventListener('click', crossReferenceDevices);
+        
+        // Insert after the output devices button
+        outputDevicesBtn.parentNode.insertBefore(crossRefBtn, outputDevicesBtn.nextSibling);
+    }
+});

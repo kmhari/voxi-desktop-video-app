@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('nativeAudio', {
   // Get native OS audio output devices
   getNativeOutputDevices: () => ipcRenderer.invoke('get-native-output-devices'),
   
+  // Get cross-referenced devices (native + Web Audio API matching)
+  getCrossReferencedDevices: () => ipcRenderer.invoke('get-cross-referenced-devices'),
+  
   // Check microphone permission status
   checkMicrophonePermission: () => ipcRenderer.invoke('check-microphone-permission'),
   

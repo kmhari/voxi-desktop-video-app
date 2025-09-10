@@ -688,3 +688,28 @@ async function getLinuxOutputDevices() {
     });
   });
 }
+
+// Cross-reference native devices with Web Audio API enumerateDevices
+ipcMain.handle('get-cross-referenced-devices', async () => {
+  try {
+    // Get devices from native C library
+    const nativeResult = await getNativeAudioDevices();
+    
+    // Return both native and cross-reference instructions
+    return {
+      nativeDevices: nativeResult ? nativeResult.devices : [],
+      platform: os.platform(),
+      source: nativeResult ? nativeResult.source : 'fallback',
+      // Instructions for renderer to cross-reference with enumerateDevices()
+      crossReferenceEnabled: true,
+      message: 'Use enumerateDevices() in renderer to match device IDs'
+    };
+  } catch (error) {
+    console.error('Error getting cross-referenced devices:', error);
+    return { 
+      error: error.message, 
+      nativeDevices: [],
+      crossReferenceEnabled: false 
+    };
+  }
+});
