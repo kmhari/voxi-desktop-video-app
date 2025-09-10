@@ -1,0 +1,16 @@
+{
+  "name": "audio-recorder-app",
+  "version": "1.0.0",
+  "description": "Simple Electron app that requests audio recording permission",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": ["electron", "audio", "recording"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0"
+  }
+}

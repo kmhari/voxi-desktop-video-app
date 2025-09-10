@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Audio Recorder App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Recorder App</h1>
+        <p>This app will request permission to access your microphone for audio recording.</p>
+        
+        <div id="status" class="status info">
+            Click "Enumerate Microphones" to see available audio inputs
+        </div>
+        
+        <button id="enumerateDevices">Enumerate Microphones (Web API)</button>
+        <button id="enumerateNativeDevices">Enumerate Native OS Devices</button>
+        
+        <div id="deviceSelector" style="display: none; margin: 20px 0;">
+            <label for="microphoneSelect" style="display: block; margin-bottom: 10px; font-weight: bold;">
+                Select Microphone:
+            </label>
+            <select id="microphoneSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                <option value="">Choose a microphone...</option>
+            </select>
+        </div>
+        
+        <button id="requestPermission" disabled>Request Permission for Selected Device</button>
+        <button id="startRecording" disabled>Start Recording</button>
+        <button id="stopRecording" disabled>Stop Recording</button>
+        
+        <div id="nativeDeviceInfo" style="display: none; margin: 20px 0;">
+            <h3>Native OS Audio Devices:</h3>
+            <div id="nativeDeviceList"></div>
+        </div>
+        
+        <div id="audioContainer"></div>
+    </div>
+    
+    <script src="renderer.js"></script>
+</body>
+</html>
