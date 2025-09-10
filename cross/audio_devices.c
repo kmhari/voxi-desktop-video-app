@@ -10,6 +10,7 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <propidl.h>
 #include <combaseapi.h>
+#include <ctype.h>
 
 // Windows implementation
 int list_audio_output_devices(AudioDevice** devices) {
@@ -108,46 +109,87 @@ int list_audio_output_devices(AudioDevice** devices) {
                         );
                         if (SUCCEEDED(hr)) {
                             switch (varType.uintVal) {
-                                case 1: // RemoteNetworkDevice
+                                case 0: // RemoteSpeakers
                                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                                     (*devices)[device_count].connection = CONNECTION_WIRELESS;
                                     break;
-                                case 2: // Speakers
+                                case 1: // Speakers
                                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                                     (*devices)[device_count].connection = CONNECTION_BUILTIN;
                                     break;
-                                case 3: // LineLevel
+                                case 2: // LineLevel
                                     (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
                                     (*devices)[device_count].connection = CONNECTION_WIRED;
                                     break;
-                                case 4: // Headphones
+                                case 3: // Headphones
                                     (*devices)[device_count].type = DEVICE_TYPE_HEADPHONES;
                                     (*devices)[device_count].connection = CONNECTION_WIRED;
                                     break;
-                                case 8: // Headset
+                                case 4: // Microphone
+                                    (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
+                                    (*devices)[device_count].connection = CONNECTION_WIRED;
+                                    break;
+                                case 5: // Headset
                                     (*devices)[device_count].type = DEVICE_TYPE_HEADPHONES;
                                     (*devices)[device_count].connection = CONNECTION_WIRED;
                                     break;
-                                case 9: // Handset
+                                case 6: // Handset
                                     (*devices)[device_count].type = DEVICE_TYPE_HEADPHONES;
                                     (*devices)[device_count].connection = CONNECTION_WIRED;
                                     break;
-                                case 10: // DigitalAudioDisplayDevice
+                                case 7: // UnknownDigitalPassthrough
+                                    (*devices)[device_count].type = DEVICE_TYPE_UNKNOWN;
+                                    (*devices)[device_count].connection = CONNECTION_WIRED;
+                                    break;
+                                case 8: // SPDIF
+                                    (*devices)[device_count].type = DEVICE_TYPE_SPEAKERS;
+                                    (*devices)[device_count].connection = CONNECTION_WIRED;
+                                    break;
+                                case 9: // DigitalAudioDisplayDevice/HDMI
                                     (*devices)[device_count].type = DEVICE_TYPE_HDMI;
                                     (*devices)[device_count].connection = CONNECTION_WIRED;
                                     break;
+                                case 10: // UnknownFormFactor
                                 default:
                                     (*devices)[device_count].type = DEVICE_TYPE_UNKNOWN;
                                     (*devices)[device_count].connection = CONNECTION_UNKNOWN;
                             }
                         }
                         
-                        // Check for Bluetooth or USB in device ID
-                        if (strstr((*devices)[device_count].id, "BTHENUM") != NULL) {
+                        // Check device name for additional hints (convert to lowercase for comparison)
+                        char name_lower[256];
+                        strcpy(name_lower, (*devices)[device_count].name);
+                        for (int j = 0; name_lower[j]; j++) {
+                            name_lower[j] = tolower(name_lower[j]);
+                        }
+                        
+                        // Check for headphone/headset keywords in device name
+                        if (strstr(name_lower, "headphone") != NULL || 
+                            strstr(name_lower, "headset") != NULL ||
+                            strstr(name_lower, "earphone") != NULL ||
+                            strstr(name_lower, "earbuds") != NULL) {
+                            (*devices)[device_count].type = DEVICE_TYPE_HEADPHONES;
+                            // Keep existing connection type unless it's unknown
+                            if ((*devices)[device_count].connection == CONNECTION_UNKNOWN) {
+                                (*devices)[device_count].connection = CONNECTION_WIRED;
+                            }
+                        }
+                        
+                        // Check for Bluetooth or USB in device ID or name
+                        if (strstr((*devices)[device_count].id, "BTHENUM") != NULL ||
+                            strstr(name_lower, "bluetooth") != NULL ||
+                            strstr(name_lower, "airpods") != NULL) {
                             (*devices)[device_count].type = DEVICE_TYPE_BLUETOOTH;
                             (*devices)[device_count].connection = CONNECTION_WIRELESS;
-                        } else if (strstr((*devices)[device_count].id, "USB") != NULL) {
-                            (*devices)[device_count].type = DEVICE_TYPE_USB;
+                        } else if (strstr((*devices)[device_count].id, "USB") != NULL ||
+                                   strstr(name_lower, "usb") != NULL) {
+                            // USB devices could be headphones, check name
+                            if (strstr(name_lower, "headphone") != NULL || 
+                                strstr(name_lower, "headset") != NULL) {
+                                (*devices)[device_count].type = DEVICE_TYPE_HEADPHONES;
+                            } else {
+                                (*devices)[device_count].type = DEVICE_TYPE_USB;
+                            }
                             (*devices)[device_count].connection = CONNECTION_WIRED;
                         }
                         
