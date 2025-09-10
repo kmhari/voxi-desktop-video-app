@@ -312,6 +312,18 @@ requestPermissionBtn.addEventListener('click', async () => {
         
         updateStatus('Requesting permission for selected microphone...', 'info');
         
+        // Check system-level permission first (for Electron)
+        if (window.nativeAudio && window.nativeAudio.checkMicrophonePermission) {
+            const permissionCheck = await window.nativeAudio.checkMicrophonePermission();
+            if (permissionCheck.status === 'denied') {
+                const requestResult = await window.nativeAudio.requestMicrophonePermission();
+                if (!requestResult.granted) {
+                    updateStatus('❌ Microphone permission denied at system level. Please check your system settings.', 'error');
+                    return;
+                }
+            }
+        }
+        
         // Request microphone permission for specific device
         stream = await navigator.mediaDevices.getUserMedia({ 
             audio: { 

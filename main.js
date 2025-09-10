@@ -151,31 +151,6 @@ ipcMain.handle('get-native-output-devices', async () => {
   }
 });
 
-// Check microphone permission status (macOS)
-ipcMain.handle('check-microphone-permission', async () => {
-  if (os.platform() === 'darwin') {
-    try {
-      const status = systemPreferences.getMediaAccessStatus('microphone');
-      return { status, platform: 'darwin' };
-    } catch (error) {
-      return { error: error.message, platform: 'darwin' };
-    }
-  }
-  return { status: 'not-applicable', platform: os.platform() };
-});
-
-// Request microphone permission (macOS)
-ipcMain.handle('request-microphone-permission', async () => {
-  if (os.platform() === 'darwin') {
-    try {
-      const granted = await systemPreferences.askForMediaAccess('microphone');
-      return { granted, platform: 'darwin' };
-    } catch (error) {
-      return { error: error.message, platform: 'darwin' };
-    }
-  }
-  return { granted: true, platform: os.platform() };
-});
 
 // Helper function to classify device type and connectivity
 function classifyAudioDevice(name, manufacturer) {
