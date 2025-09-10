@@ -59,42 +59,20 @@
 </head>
 <body>
     <div class="container">
-        <h1>Audio Recorder App</h1>
-        <p>This app will request permission to access your microphone for audio recording.</p>
+        <h1>Audio Output Device Detection App</h1>
+        <p>This app detects and displays available audio output devices on your system.</p>
         
         <div id="status" class="status info">
-            Click "Enumerate Microphones" to see available audio inputs<br>
+            Click "Enumerate Output Devices" to see available audio outputs<br>
             <small>✨ Enhanced Windows 10/11 support with native device detection</small>
         </div>
         
-        <button id="enumerateDevices">Enumerate Microphones (Web API)</button>
-        <button id="enumerateNativeDevices">Enumerate Native Input Devices</button>
         <button id="enumerateOutputDevices">Enumerate Output Devices</button>
-        
-        <div id="deviceSelector" style="display: none; margin: 20px 0;">
-            <label for="microphoneSelect" style="display: block; margin-bottom: 10px; font-weight: bold;">
-                Select Microphone:
-            </label>
-            <select id="microphoneSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
-                <option value="">Choose a microphone...</option>
-            </select>
-        </div>
-        
-        <button id="requestPermission" disabled>Request Permission for Selected Device</button>
-        <button id="startRecording" disabled>Start Recording</button>
-        <button id="stopRecording" disabled>Stop Recording</button>
-        
-        <div id="nativeDeviceInfo" style="display: none; margin: 20px 0;">
-            <h3>Native OS Audio Input Devices:</h3>
-            <div id="nativeDeviceList"></div>
-        </div>
         
         <div id="outputDeviceInfo" style="display: none; margin: 20px 0;">
             <h3>Native OS Audio Output Devices:</h3>
             <div id="outputDeviceList"></div>
         </div>
-        
-        <div id="audioContainer"></div>
     </div>
     
     <script src="renderer.js"></script>
