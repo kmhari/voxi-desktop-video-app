@@ -67,7 +67,8 @@
         </div>
         
         <button id="enumerateDevices">Enumerate Microphones (Web API)</button>
-        <button id="enumerateNativeDevices">Enumerate Native OS Devices</button>
+        <button id="enumerateNativeDevices">Enumerate Native Input Devices</button>
+        <button id="enumerateOutputDevices">Enumerate Output Devices</button>
         
         <div id="deviceSelector" style="display: none; margin: 20px 0;">
             <label for="microphoneSelect" style="display: block; margin-bottom: 10px; font-weight: bold;">
@@ -83,8 +84,13 @@
         <button id="stopRecording" disabled>Stop Recording</button>
         
         <div id="nativeDeviceInfo" style="display: none; margin: 20px 0;">
-            <h3>Native OS Audio Devices:</h3>
+            <h3>Native OS Audio Input Devices:</h3>
             <div id="nativeDeviceList"></div>
+        </div>
+        
+        <div id="outputDeviceInfo" style="display: none; margin: 20px 0;">
+            <h3>Native OS Audio Output Devices:</h3>
+            <div id="outputDeviceList"></div>
         </div>
         
         <div id="audioContainer"></div>

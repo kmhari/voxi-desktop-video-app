@@ -2,8 +2,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Expose native audio device APIs to renderer process
 contextBridge.exposeInMainWorld('nativeAudio', {
-  // Get native OS audio devices
+  // Get native OS audio input devices
   getNativeDevices: () => ipcRenderer.invoke('get-native-audio-devices'),
+  
+  // Get native OS audio output devices
+  getNativeOutputDevices: () => ipcRenderer.invoke('get-native-output-devices'),
   
   // Check microphone permission status (macOS)
   checkMicrophonePermission: () => ipcRenderer.invoke('check-microphone-permission'),
