@@ -1,7 +1,10 @@
-const { app, BrowserWindow, ipcMain, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, systemPreferences, dialog } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const os = require('os');
+
+// Disable GPU acceleration to prevent GPU process errors
+app.disableHardwareAcceleration();
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -36,11 +39,53 @@ app.on('activate', () => {
   }
 });
 
+// Permission handlers
+ipcMain.handle('check-media-access', async (event, mediaType) => {
+  if (process.platform === 'darwin') {
+    // macOS requires explicit permission
+    const status = systemPreferences.getMediaAccessStatus(mediaType);
+    if (status !== 'granted') {
+      const granted = await systemPreferences.askForMediaAccess(mediaType);
+      return granted;
+    }
+    return true;
+  } else if (process.platform === 'win32') {
+    // Windows typically grants permissions automatically, but we'll check
+    try {
+      // Check Windows privacy settings
+      const { exec: execSync } = require('child_process');
+      return new Promise((resolve) => {
+        execSync('powershell -Command "Get-PnpDevice -Class AudioEndpoint -Status OK"', (error) => {
+          resolve(!error);
+        });
+      });
+    } catch {
+      return true; // Assume granted if we can't check
+    }
+  }
+  return true; // Linux and others
+});
+
 // Native audio device enumeration handlers
 ipcMain.handle('get-native-audio-devices', async () => {
   const platform = os.platform();
   
   try {
+    // Check for microphone permission first
+    if (platform === 'darwin') {
+      const microphoneAccess = systemPreferences.getMediaAccessStatus('microphone');
+      if (microphoneAccess !== 'granted') {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        if (!granted) {
+          return { 
+            error: 'Microphone access denied. Please grant permission in System Preferences.', 
+            devices: [],
+            permissionDenied: true 
+          };
+        }
+      }
+    }
+    
     if (platform === 'darwin') {
       // macOS - use system_profiler
       return await getMacOSAudioDevices();
@@ -55,6 +100,37 @@ ipcMain.handle('get-native-audio-devices', async () => {
     console.error('Error getting native audio devices:', error);
     return { error: error.message, devices: [] };
   }
+});
+
+// Check microphone permission handler
+ipcMain.handle('check-microphone-permission', async () => {
+  if (process.platform === 'darwin') {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    return { status };
+  } else if (process.platform === 'win32') {
+    // Windows typically auto-grants permissions
+    return { status: 'granted' };
+  }
+  return { status: 'granted' };
+});
+
+// Request microphone permission handler
+ipcMain.handle('request-microphone-permission', async () => {
+  if (process.platform === 'darwin') {
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    return { granted };
+  } else if (process.platform === 'win32') {
+    // Show a dialog to guide user to Windows settings if needed
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Microphone Access',
+      message: 'Please ensure microphone access is enabled in Windows Settings',
+      detail: 'Go to Settings > Privacy > Microphone and ensure apps can access your microphone.',
+      buttons: ['OK']
+    });
+    return { granted: true };
+  }
+  return { granted: true };
 });
 
 // Native audio output device enumeration handler
@@ -131,6 +207,11 @@ function classifyAudioDevice(name, manufacturer) {
              nameLower.includes('built-in mic') || nameLower.includes('internal mic') ||
              nameLower.includes('webcam') || nameLower.includes('camera')) {
     deviceType = 'microphone';
+  } else if (nameLower.includes('audio') || nameLower.includes('sound') ||
+             nameLower.includes('realtek') || nameLower.includes('amd') ||
+             nameLower.includes('nvidia') || nameLower.includes('intel')) {
+    // Generic audio devices - typically integrated sound cards that handle both input and output
+    deviceType = 'speaker';  // Default to speaker for generic audio devices
   }
   
   // Connectivity classification
@@ -144,8 +225,11 @@ function classifyAudioDevice(name, manufacturer) {
              nameLower.includes('jack') || nameLower.includes('line') ||
              nameLower.includes('xlr') || nameLower.includes('trs') ||
              nameLower.includes('built-in') || nameLower.includes('internal') ||
-             nameLower.includes('wired') || nameLower.includes('cable')) {
-    connectivity = 'wired';
+             nameLower.includes('wired') || nameLower.includes('cable') ||
+             nameLower.includes('realtek') || nameLower.includes('amd') ||
+             nameLower.includes('nvidia') || nameLower.includes('intel') ||
+             nameLower.includes('high definition audio')) {
+    connectivity = 'wired';  // Integrated audio devices are considered wired
   }
   
   return { deviceType, connectivity };
@@ -251,7 +335,6 @@ async function getWindowsAudioDevices() {
   return new Promise((resolve, reject) => {
     const powershellCmd = `
       Get-CimInstance -ClassName Win32_SoundDevice | 
-      Where-Object {$_.DeviceID -like "*CAPTURE*" -or $_.Name -like "*Microphone*" -or $_.Name -like "*Input*"} |
       Select-Object Name, Manufacturer, DeviceID, Status |
       ConvertTo-Json
     `;
@@ -263,7 +346,14 @@ async function getWindowsAudioDevices() {
       }
       
       try {
-        const devices = JSON.parse(stdout) || [];
+        // Handle empty output from PowerShell
+        const trimmedOutput = stdout.trim();
+        if (!trimmedOutput) {
+          resolve({ devices: [], platform: 'win32' });
+          return;
+        }
+        
+        const devices = JSON.parse(trimmedOutput) || [];
         const audioDevices = (Array.isArray(devices) ? devices : [devices]).map(device => {
           const classification = classifyAudioDevice(device.Name, device.Manufacturer);
           
@@ -292,7 +382,6 @@ async function getWindowsOutputDevices() {
   return new Promise((resolve, reject) => {
     const powershellCmd = `
       Get-CimInstance -ClassName Win32_SoundDevice | 
-      Where-Object {$_.DeviceID -like "*RENDER*" -or $_.Name -like "*Speaker*" -or $_.Name -like "*Output*" -or $_.Name -like "*Headphone*"} |
       Select-Object Name, Manufacturer, DeviceID, Status |
       ConvertTo-Json
     `;
@@ -304,7 +393,14 @@ async function getWindowsOutputDevices() {
       }
       
       try {
-        const devices = JSON.parse(stdout) || [];
+        // Handle empty output from PowerShell
+        const trimmedOutput = stdout.trim();
+        if (!trimmedOutput) {
+          resolve({ devices: [], platform: 'win32' });
+          return;
+        }
+        
+        const devices = JSON.parse(trimmedOutput) || [];
         const audioDevices = (Array.isArray(devices) ? devices : [devices]).map(device => {
           const classification = classifyAudioDevice(device.Name, device.Manufacturer);
           

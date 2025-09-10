@@ -8,11 +8,14 @@ contextBridge.exposeInMainWorld('nativeAudio', {
   // Get native OS audio output devices
   getNativeOutputDevices: () => ipcRenderer.invoke('get-native-output-devices'),
   
-  // Check microphone permission status (macOS)
+  // Check microphone permission status
   checkMicrophonePermission: () => ipcRenderer.invoke('check-microphone-permission'),
   
-  // Request microphone permission (macOS)
-  requestMicrophonePermission: () => ipcRenderer.invoke('request-microphone-permission')
+  // Request microphone permission
+  requestMicrophonePermission: () => ipcRenderer.invoke('request-microphone-permission'),
+  
+  // Check media access permission
+  checkMediaAccess: (mediaType) => ipcRenderer.invoke('check-media-access', mediaType)
 });
 
 // Expose platform information

@@ -26,14 +26,22 @@ function updateStatus(message, type = 'info') {
 // Enumerate audio input devices
 enumerateDevicesBtn.addEventListener('click', async () => {
     try {
-        updateStatus('Enumerating audio input devices...', 'info');
+        updateStatus('Checking audio permissions...', 'info');
+        
+        // Check if we have permission first
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+        
+        if (permissionStatus && permissionStatus.state === 'denied') {
+            updateStatus('❌ Microphone access denied. Please grant permission in your browser settings.', 'error');
+            return;
+        }
         
         // First request basic permission to enumerate devices
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioInputs = devices.filter(device => device.kind === 'audioinput');
         
         if (audioInputs.length === 0) {
-            updateStatus('❌ No audio input devices found.', 'error');
+            updateStatus('❌ No audio input devices found. Please check your audio settings.', 'error');
             return;
         }
         
@@ -88,7 +96,8 @@ enumerateNativeDevicesBtn.addEventListener('click', async () => {
         
         // Check if native audio APIs are available
         if (!window.nativeAudio) {
-            updateStatus('❌ Native audio APIs not available. Please restart the app.', 'error');
+            updateStatus('❌ Native audio APIs not available. Please check if the app has proper permissions.', 'error');
+            console.error('window.nativeAudio is not available');
             return;
         }
         
@@ -119,12 +128,25 @@ enumerateNativeDevicesBtn.addEventListener('click', async () => {
         const result = await window.nativeAudio.getNativeDevices();
         
         if (result.error) {
-            updateStatus(`❌ Error getting native devices: ${result.error}`, 'error');
+            if (result.permissionDenied) {
+                updateStatus(`⚠️ ${result.error}`, 'warning');
+                // Show permission dialog button for Windows
+                if (platform === 'win32') {
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Open Windows Settings';
+                    btn.onclick = () => window.nativeAudio.requestMicrophonePermission();
+                    nativeDeviceInfo.appendChild(btn);
+                }
+            } else {
+                updateStatus(`❌ Error getting native devices: ${result.error}`, 'error');
+            }
             return;
         }
         
         if (!result.devices || result.devices.length === 0) {
-            updateStatus('⚠️ No native audio input devices found.', 'error');
+            updateStatus('⚠️ No native audio devices found. Please check your audio hardware and drivers.', 'warning');
+            nativeDeviceInfo.style.display = 'block';
+            nativeDeviceList.innerHTML = '<p style="color: #666;">No audio devices detected. This could mean:<br>• Audio drivers are not installed<br>• Audio devices are disabled<br>• Permission is required</p>';
             return;
         }
         
