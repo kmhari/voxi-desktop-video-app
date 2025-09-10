@@ -142,6 +142,98 @@ enumerateOutputDevicesBtn.addEventListener('click', async () => {
 
 // Removed microphone permission and recording functionality - only supporting output devices
 
+// Calculate similarity between device names for intelligent matching
+function calculateDeviceSimilarity(nativeName, webLabel) {
+    const native = nativeName.toLowerCase().trim();
+    const web = webLabel.toLowerCase().trim();
+    
+    let score = 0;
+    let matchType = '';
+    let confidence = 'low';
+    
+    // Exact match (highest priority)
+    if (native === web) {
+        score = 100;
+        matchType = 'name-exact';
+        confidence = 'high';
+        return { score, matchType, confidence };
+    }
+    
+    // Check for exact substring matches (very high priority)
+    if (native.includes(web) || web.includes(native)) {
+        const shorter = native.length < web.length ? native : web;
+        const longer = native.length < web.length ? web : native;
+        const ratio = shorter.length / longer.length;
+        
+        score = 85 + (ratio * 10); // 85-95 range
+        matchType = 'name-substring';
+        confidence = ratio > 0.7 ? 'high' : 'medium';
+        return { score, matchType, confidence };
+    }
+    
+    // Keyword-based matching for common audio device terms
+    const keywords = ['speaker', 'headphone', 'headset', 'earbud', 'airpods', 'bluetooth', 'usb', 'hdmi', 'realtek', 'nvidia', 'amd', 'intel'];
+    const nativeKeywords = keywords.filter(keyword => native.includes(keyword));
+    const webKeywords = keywords.filter(keyword => web.includes(keyword));
+    const commonKeywords = nativeKeywords.filter(keyword => webKeywords.includes(keyword));
+    
+    if (commonKeywords.length > 0) {
+        score = 60 + (commonKeywords.length * 10); // 60-90 range based on keyword matches
+        matchType = 'keywords-match';
+        confidence = commonKeywords.length > 1 ? 'medium' : 'low';
+        
+        // Boost score for device type keywords
+        if (commonKeywords.some(keyword => ['speaker', 'headphone', 'headset', 'earbud'].includes(keyword))) {
+            score += 10;
+            confidence = 'medium';
+        }
+        
+        return { score, matchType, confidence };
+    }
+    
+    // Fuzzy string similarity using Levenshtein-like approach
+    const similarity = calculateStringSimilarity(native, web);
+    if (similarity > 0.6) {
+        score = similarity * 60; // 36-60 range
+        matchType = 'fuzzy-similarity';
+        confidence = similarity > 0.8 ? 'medium' : 'low';
+        return { score, matchType, confidence };
+    }
+    
+    // Check for manufacturer or brand matches
+    const brands = ['apple', 'beats', 'sony', 'bose', 'sennheiser', 'jabra', 'logitech', 'corsair', 'razer', 'steelseries'];
+    const nativeBrands = brands.filter(brand => native.includes(brand));
+    const webBrands = brands.filter(brand => web.includes(brand));
+    const commonBrands = nativeBrands.filter(brand => webBrands.includes(brand));
+    
+    if (commonBrands.length > 0) {
+        score = 40 + (commonBrands.length * 10);
+        matchType = 'brand-match';
+        confidence = 'low';
+        return { score, matchType, confidence };
+    }
+    
+    return { score: 0, matchType: 'no-match', confidence: 'none' };
+}
+
+// Simple string similarity calculator (Dice coefficient)
+function calculateStringSimilarity(str1, str2) {
+    const bigrams1 = getBigrams(str1);
+    const bigrams2 = getBigrams(str2);
+    
+    const intersection = bigrams1.filter(bigram => bigrams2.includes(bigram));
+    return (2 * intersection.length) / (bigrams1.length + bigrams2.length);
+}
+
+// Get bigrams (pairs of consecutive characters) from a string
+function getBigrams(str) {
+    const bigrams = [];
+    for (let i = 0; i < str.length - 1; i++) {
+        bigrams.push(str.slice(i, i + 2));
+    }
+    return bigrams;
+}
+
 // Cross-reference native devices with Web Audio API
 async function crossReferenceDevices() {
     try {
@@ -152,44 +244,68 @@ async function crossReferenceDevices() {
         
         // Get Web Audio API devices (only output devices to match our native library)
         const webAudioDevices = await navigator.mediaDevices.enumerateDevices();
-        const audioOutputs = webAudioDevices.filter(device => device.kind === 'audiooutput');
+        const audioOutputs = webAudioDevices.filter(device => 
+            device.kind === 'audiooutput' && 
+            device.deviceId !== 'default' && 
+            device.deviceId !== 'communications'
+        );
         
         console.log('Native devices:', crossRefResult.nativeDevices);
         console.log('Web Audio devices:', audioOutputs);
         
-        // Create matching table
+        // Create matching table with best-match algorithm
         const matches = [];
         const matchedNativeIds = new Set();
         const matchedWebIds = new Set();
         
-        // Simple name-based device matching
+        // Calculate similarity scores for all device pairs
+        const devicePairs = [];
+        
         crossRefResult.nativeDevices.forEach((nativeDevice) => {
-            // Skip if already matched
-            if (matchedNativeIds.has(nativeDevice.id)) return;
-            
             audioOutputs.forEach((webDevice) => {
-                // Skip if already matched
-                if (matchedWebIds.has(webDevice.deviceId)) return;
-                
                 if (webDevice.label && nativeDevice.name) {
-                    const webLabel = webDevice.label.toLowerCase().trim();
-                    const nativeName = nativeDevice.name.toLowerCase().trim();
-                    
-                    // Partial name match (contains)
-                    if (webLabel.includes(nativeName) || nativeName.includes(webLabel)) {
-                        matches.push({
+                    const similarity = calculateDeviceSimilarity(nativeDevice.name, webDevice.label);
+                    if (similarity.score > 0) {
+                        devicePairs.push({
                             native: nativeDevice,
                             webAudio: webDevice,
-                            matchType: 'name-partial',
-                            confidence: 'medium'
+                            similarity: similarity,
+                            score: similarity.score
                         });
-                        
-                        // Mark as matched to prevent duplicates
-                        matchedNativeIds.add(nativeDevice.id);
-                        matchedWebIds.add(webDevice.deviceId);
                     }
                 }
             });
+        });
+        
+        // Sort pairs by similarity score (highest first) and then by confidence
+        devicePairs.sort((a, b) => {
+            if (a.score !== b.score) {
+                return b.score - a.score; // Higher score first
+            }
+            // If scores are equal, prefer higher confidence matches
+            const confidenceOrder = { high: 3, medium: 2, low: 1 };
+            return confidenceOrder[b.similarity.confidence] - confidenceOrder[a.similarity.confidence];
+        });
+        
+        // Process pairs in order of best matches first
+        devicePairs.forEach(pair => {
+            // Skip if either device is already matched
+            if (matchedNativeIds.has(pair.native.id) || matchedWebIds.has(pair.webAudio.deviceId)) {
+                return;
+            }
+            
+            // Create the match
+            matches.push({
+                native: pair.native,
+                webAudio: pair.webAudio,
+                matchType: pair.similarity.matchType,
+                confidence: pair.similarity.confidence,
+                score: pair.score
+            });
+            
+            // Mark both devices as matched
+            matchedNativeIds.add(pair.native.id);
+            matchedWebIds.add(pair.webAudio.deviceId);
         });
         
         // Create unmatched lists by filtering out matched devices
@@ -258,13 +374,13 @@ function displayCrossReferenceResults(matches, unmatchedNative, unmatchedWeb, cr
             }[match.confidence];
             
             const matchTypeLabels = {
-                'id-exact': 'Direct ID Match',
                 'name-exact': 'Exact Name Match',
-                'name-partial': 'Partial Name Match',
-                'name-keywords': 'Keyword Match',
-                'type-builtin': 'Built-in Type Match',
-                'default-device': 'Default Device Match',
-                'position-correlation': 'Position Correlation'
+                'name-substring': 'Substring Match',
+                'keywords-match': 'Keyword Match',
+                'fuzzy-similarity': 'Fuzzy Text Similarity',
+                'brand-match': 'Brand/Manufacturer Match',
+                'name-partial': 'Partial Name Match', // Legacy fallback
+                'no-match': 'No Match'
             };
             
             html += `
@@ -275,7 +391,10 @@ function displayCrossReferenceResults(matches, unmatchedNative, unmatchedWeb, cr
                             ${match.confidence.toUpperCase()} CONFIDENCE
                         </span>
                     </div>
-                    <p style="margin: 5px 0;"><strong>Strategy:</strong> ${matchTypeLabels[match.matchType] || match.matchType}</p>
+                    <p style="margin: 5px 0;">
+                        <strong>Strategy:</strong> ${matchTypeLabels[match.matchType] || match.matchType}
+                        ${match.score ? `<span style="color: #6c757d; font-size: 0.9em;"> (Score: ${Math.round(match.score)}/100)</span>` : ''}
+                    </p>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
                         <div style="background: #f8f9fa; padding: 10px; border-radius: 5px;">
                             <strong style="color: #495057;">🔧 Native System API</strong><br>
