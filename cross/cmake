@@ -1,0 +1,35 @@
+# CMakeLists.txt (Alternative build system)
+cmake_minimum_required(VERSION 3.10)
+project(AudioDeviceLister C)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Source files
+set(SOURCES
+    main.c
+    audio_devices.c
+)
+
+# Create executable
+add_executable(list_audio_devices ${SOURCES})
+
+# Platform-specific configurations
+if(WIN32)
+    target_link_libraries(list_audio_devices ole32 oleaut32 uuid)
+elseif(APPLE)
+    find_library(COREAUDIO_LIBRARY CoreAudio)
+    find_library(COREFOUNDATION_LIBRARY CoreFoundation)
+    target_link_libraries(list_audio_devices ${COREAUDIO_LIBRARY} ${COREFOUNDATION_LIBRARY})
+elseif(UNIX)
+    find_package(ALSA REQUIRED)
+    target_link_libraries(list_audio_devices ${ALSA_LIBRARIES})
+    target_include_directories(list_audio_devices PRIVATE ${ALSA_INCLUDE_DIRS})
+endif()
+
+# Set compiler warnings
+if(MSVC)
+    target_compile_options(list_audio_devices PRIVATE /W4)
+else()
+    target_compile_options(list_audio_devices PRIVATE -Wall -Wextra -Wpedantic)
+endif()
